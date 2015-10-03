@@ -19,16 +19,17 @@ module Bogo
       attribute :ssl_key, String
       attribute :ssl_certificate, String
 
+      attribute :on_connect, Proc, :default => proc{}
+      attribute :on_disconnect, Proc, :default => proc{}
+      attribute :on_error, Proc, :default => proc{|error|}
+      attribute :on_message, Proc, :default => proc{|message|}
+
       # @return [TCPSocket, OpenSSL::SSL::SSLSocket]
       attr_reader :connection
       # @return [Thread]
       attr_reader :container
-      # @return [String]
-      attr_reader :content
       # @return [WebSocket::Frame::Incoming::Client]
       attr_reader :client
-      # @return [Mutex]
-      attr_reader :lock
       # @return [WebSocket::Handshake::Client]
       attr_reader :handshake
 
@@ -40,20 +41,7 @@ module Bogo
         setup_connection
         perform_handshake
         @lock = Mutex.new
-        @content = String.new
         @container = start!
-      end
-
-      # TODO: Add support for exception on closed
-
-      # Read from the socket
-      #
-      # @param n [Integer] maximum number of bytes to read
-      # @return [String]
-      def read(n=nil)
-        lock.synchronize do
-          content.slice!(0, n || content.length)
-        end
       end
 
       # Write to socket
@@ -85,13 +73,11 @@ module Bogo
               rescue IO::WaitReadable
                 IO.select([connection])
                 retry
-              rescue => e
-                @dead =
-                puts "OMG: #{e.class}: #{e}\n#{e.backtrace.join("\n")}"
-                raise
+              rescue => error
+                on_error.call(error)
               end
             end
-            puts "AND SOCKET IS OUT"
+            on_disconnect.call
           end
         end
       end
@@ -102,11 +88,12 @@ module Bogo
       def handle_message(message)
         case message.type
         when :binary, :text
-          lock.synchronize{ content << message.data }
+          on_message.call(message.data)
         when :ping
           transmit(message.data, :pong)
         when :close
           connection.close
+          on_close.call
         end
       end
 
