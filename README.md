@@ -15,6 +15,9 @@ socket = Bogo::Websocket::Client.new(
   :params => {
     :fubar => true
   },
+  :headers => {
+    'X-WOW' => 'custom header'
+  },
   :on_connect => proc{
     puts 'Socket Connected'
   },
