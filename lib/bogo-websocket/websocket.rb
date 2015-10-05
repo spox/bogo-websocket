@@ -32,12 +32,20 @@ module Bogo
       attr_reader :client
       # @return [WebSocket::Handshake::Client]
       attr_reader :handshake
+      # @return [TrueClass, FalseClass]
+      attr_reader :die
+      # @return [IO]
+      attr_reader :control_r
+      # @return [IO]
+      attr_reader :control_w
 
       # Create a new websocket client
       #
       # @return [self]
       def initialize(args={})
         load_data(args)
+        @control_r, @control_w = IO.pipe
+        @die = false
         setup_connection
         perform_handshake
         @lock = Mutex.new
@@ -53,31 +61,37 @@ module Bogo
 
       # Close the connection
       def close
-        unless(connection.closed?)
-          connection.close
-        end
+        connection.close
+        @die = true
+        control_w.write 'closed'
+        container.join
       end
 
       # Start the reader
       def start!
         unless(@container)
           @container = Thread.new do
-            until(connection.closed?)
+            until(die || connection.closed?)
               begin
-                unless(connection.closed?)
+                unless(die || connection.closed?)
                   client << connection.read_nonblock(2046)
-                end
-                if(message = client.next)
-                  handle_message(message)
+                  if(message = client.next)
+                    handle_message(message)
+                  end
                 end
               rescue IO::WaitReadable
-                IO.select([connection])
-                retry
+                unless(die || connection.closed?)
+                  IO.select([connection, control_r])
+                  retry
+                end
+              rescue EOFError
+                connection.close
               rescue => error
                 on_error.call(error)
+                raise
               end
             end
-            on_disconnect.call
+            @connection = nil
           end
         end
       end
@@ -93,7 +107,7 @@ module Bogo
           transmit(message.data, :pong)
         when :close
           connection.close
-          on_close.call
+          on_disconnect.call
         end
       end
 
