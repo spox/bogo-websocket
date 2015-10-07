@@ -79,13 +79,11 @@ module Bogo
                     handle_message(message)
                   end
                 end
-              rescue IO::WaitReadable
+              rescue IO::WaitReadable, EOFError
                 unless(die || connection.closed?)
                   IO.select([connection, control_r])
                   retry
                 end
-              rescue EOFError
-                connection.close
               rescue => error
                 on_error.call(error)
                 raise
