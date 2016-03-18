@@ -61,10 +61,13 @@ module Bogo
 
       # Close the connection
       def close
-        connection.close
-        @die = true
-        control_w.write 'closed'
-        container.join
+        if(connection)
+          connection.close
+          @die = true
+          control_w.write 'closed'
+          container.join unless Thread.current == container
+          @connection = nil
+        end
       end
 
       # Start the reader
@@ -74,22 +77,21 @@ module Bogo
             until(die || connection.closed?)
               begin
                 unless(die || connection.closed?)
-                  client << connection.read_nonblock(2046)
+                  client << connection.read_nonblock(1024)
                   if(message = client.next)
                     handle_message(message)
                   end
                 end
-              rescue IO::WaitReadable, EOFError, Errno::ECONNRESET
+              rescue IO::WaitReadable, Errno::EAGAIN => e
                 unless(die || connection.closed?)
                   IO.select([connection, control_r])
                   retry
                 end
               rescue => error
                 on_error.call(error)
-                raise
+                close
               end
             end
-            @connection = nil
           end
         end
       end
